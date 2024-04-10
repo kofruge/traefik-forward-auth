@@ -5,6 +5,12 @@ A minimal forward authentication service that provides OAuth/SSO login and authe
 
 ## Fork notes
 
+This is a fork of [jordemort/traefik-forward-auth](https://github.com/jordemort/traefik-forward-auth) that's been modified to automatically clear the unauthorized cookie if a user completes oauth authentication with a non-whitelisted user account. This should make things more user friendly so that if a user accidentally signs in with the wrong account, they can simply refresh the "not authorized" error page to try signing in again without having to manually navigate to the /logout endpoint to clear the unauthorized cookie first.
+
+My changes are based on [this pull request by luisvsm](https://github.com/thomseddon/traefik-forward-auth/pull/286/files), so all credit goes to them.
+
+## Original fork notes from [jordemort/traefik-forward-auth](https://github.com/jordemort/traefik-forward-auth)
+
 This is yet another fork of [thomseddon/traefik-forward-auth](https://github.com/thomseddon/traefik-forward-auth).
 I have merged several pull requests that have not (yet?) been merged upstream:
 
