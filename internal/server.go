@@ -130,7 +130,7 @@ func (s *Server) AuthHandler(providerName, rule string) http.HandlerFunc {
 		if !valid {
 			logger.WithField("user", escapeNewlines(user)).Warn("Invalid user")
 			http.SetCookie(w, ClearCookie(r))
-			http.Error(w, "User is not authorized (Refresh to login with another user account)", 401)
+			http.Error(w, "The user account you signed in with is not authorized to access this site. Refresh this page to sign in again with an authorized user account.", 401)
 			return
 		}
 
