@@ -130,7 +130,7 @@ func (s *Server) AuthHandler(providerName, rule string) http.HandlerFunc {
 		if !valid {
 			logger.WithField("user", escapeNewlines(user)).Warn("Invalid user")
 			http.SetCookie(w, ClearCookie(r))
-			http.Error(w, "The user account you signed in with is not authorized to access this site. Refresh this page to sign in again with an authorized user account.", 401)
+			http.Error(w, `The user account you signed in with is not authorized to access this site. Refresh this page to sign in again with an authorized user account. If you are trying to sign in with a Microsoft account, copy and paste the follwing url into a new browser tab to sign out your Microsoft session before refreshing this page: https://login.microsoftonline.com/common/oauth2/v2.0/logout`, 401)
 			return
 		}
 
