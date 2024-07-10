@@ -3,6 +3,7 @@ package tfa
 import (
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 	"github.com/thomseddon/traefik-forward-auth/internal/provider"
@@ -19,6 +20,12 @@ func NewServer() *Server {
 	s := &Server{}
 	s.buildRoutes()
 	return s
+}
+
+func escapeNewlines(data string) string {
+	escapedData := strings.Replace(data, "\n", "", -1)
+	escapedData = strings.Replace(escapedData, "\r", "", -1)
+	return escapedData
 }
 
 func (s *Server) buildRoutes() {
@@ -84,6 +91,20 @@ func (s *Server) AuthHandler(providerName, rule string) http.HandlerFunc {
 		// Logging setup
 		logger := s.logger(r, "Auth", rule, "Authenticating request")
 
+		ipAddr := escapeNewlines(r.Header.Get("X-Forwarded-For"))
+		if ipAddr == "" {
+			logger.Warn("missing x-forwarded-for header")
+		} else {
+			ok, err := config.IsIPAddressAuthenticated(ipAddr)
+			if err != nil {
+				logger.WithField("error", err).Warn("Invalid forwarded for")
+			} else if ok {
+				logger.WithField("addr", ipAddr).Info("Authenticated remote address")
+				w.WriteHeader(200)
+				return
+			}
+		}
+
 		// Get auth cookie
 		c, err := r.Cookie(config.CookieName)
 		if err != nil {
@@ -92,7 +113,7 @@ func (s *Server) AuthHandler(providerName, rule string) http.HandlerFunc {
 		}
 
 		// Validate cookie
-		email, err := ValidateCookie(r, c)
+		user, err := ValidateCookie(r, c)
 		if err != nil {
 			if err.Error() == "Cookie has expired" {
 				logger.Info("Cookie has expired")
@@ -105,16 +126,17 @@ func (s *Server) AuthHandler(providerName, rule string) http.HandlerFunc {
 		}
 
 		// Validate user
-		valid := ValidateEmail(email, rule)
+		valid := ValidateUser(user, rule)
 		if !valid {
-			logger.WithField("email", email).Warn("Invalid email")
-			http.Error(w, "Not authorized", 401)
+			logger.WithField("user", escapeNewlines(user)).Warn("Invalid user")
+			http.SetCookie(w, ClearCookie(r))
+			http.Error(w, `The user account you signed in with is not authorized to access this site. Refresh this page to sign in again with an authorized user account. If you are trying to sign in with a Microsoft account, copy and paste the follwing url into a new browser tab to sign out your Microsoft session before refreshing this page: https://login.microsoftonline.com/common/oauth2/v2.0/logout`, 401)
 			return
 		}
 
 		// Valid request
 		logger.Debug("Allowing valid request")
-		w.Header().Set("X-Forwarded-User", email)
+		w.Header().Set("X-Forwarded-User", user)
 		w.WriteHeader(200)
 	}
 }
@@ -126,7 +148,7 @@ func (s *Server) AuthCallbackHandler() http.HandlerFunc {
 		logger := s.logger(r, "AuthCallback", "default", "Handling callback")
 
 		// Check state
-		state := r.URL.Query().Get("state")
+		state := escapeNewlines(r.URL.Query().Get("state"))
 		if err := ValidateState(state); err != nil {
 			logger.WithFields(logrus.Fields{
 				"error": err,
@@ -169,6 +191,16 @@ func (s *Server) AuthCallbackHandler() http.HandlerFunc {
 		// Clear CSRF cookie
 		http.SetCookie(w, ClearCSRFCookie(r, c))
 
+		// Validate redirect
+		redirectURL, err := ValidateRedirect(r, redirect)
+		if err != nil {
+			logger.WithFields(logrus.Fields{
+				"receieved_redirect": redirect,
+			}).Warnf("Invalid redirect in CSRF. %v", err)
+			http.Error(w, "Not authorized", 401)
+			return
+		}
+
 		// Exchange code for token
 		token, err := p.ExchangeCode(redirectUri(r), r.URL.Query().Get("code"))
 		if err != nil {
@@ -178,7 +210,7 @@ func (s *Server) AuthCallbackHandler() http.HandlerFunc {
 		}
 
 		// Get user
-		user, err := p.GetUser(token)
+		user, err := p.GetUser(token, config.UserPath)
 		if err != nil {
 			logger.WithField("error", err).Error("Error getting user")
 			http.Error(w, "Service unavailable", 503)
@@ -186,15 +218,15 @@ func (s *Server) AuthCallbackHandler() http.HandlerFunc {
 		}
 
 		// Generate cookie
-		http.SetCookie(w, MakeCookie(r, user.Email))
+		http.SetCookie(w, MakeCookie(r, user))
 		logger.WithFields(logrus.Fields{
 			"provider": providerName,
 			"redirect": redirect,
-			"user":     user.Email,
+			"user":     user,
 		}).Info("Successfully generated auth cookie, redirecting user.")
 
 		// Redirect
-		http.Redirect(w, r, redirect, http.StatusTemporaryRedirect)
+		http.Redirect(w, r, redirectURL.String(), http.StatusTemporaryRedirect)
 	}
 }
 
@@ -224,6 +256,12 @@ func (s *Server) authRedirect(logger *logrus.Entry, w http.ResponseWriter, r *ht
 		return
 	}
 
+	// clean existing CSRF cookie
+	for _, v := range r.Cookies() {
+		if strings.Contains(v.Name, config.CSRFCookieName) {
+			http.SetCookie(w, ClearCSRFCookie(r, v))
+		}
+	}
 	// Set the CSRF cookie
 	csrf := MakeCSRFCookie(r, nonce)
 	http.SetCookie(w, csrf)
@@ -249,11 +287,11 @@ func (s *Server) logger(r *http.Request, handler, rule, msg string) *logrus.Entr
 	logger := log.WithFields(logrus.Fields{
 		"handler":   handler,
 		"rule":      rule,
-		"method":    r.Header.Get("X-Forwarded-Method"),
-		"proto":     r.Header.Get("X-Forwarded-Proto"),
-		"host":      r.Header.Get("X-Forwarded-Host"),
-		"uri":       r.Header.Get("X-Forwarded-Uri"),
-		"source_ip": r.Header.Get("X-Forwarded-For"),
+		"method":    escapeNewlines(r.Header.Get("X-Forwarded-Method")),
+		"proto":     escapeNewlines(r.Header.Get("X-Forwarded-Proto")),
+		"host":      escapeNewlines(r.Header.Get("X-Forwarded-Host")),
+		"uri":       escapeNewlines(r.Header.Get("X-Forwarded-Uri")),
+		"source_ip": escapeNewlines(r.Header.Get("X-Forwarded-For")),
 	})
 
 	// Log request
