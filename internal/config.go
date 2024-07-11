@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jordemort/traefik-forward-auth/internal/provider"
+	"github.com/kofruge/traefik-forward-auth/internal/provider"
 	"github.com/thomseddon/go-flags"
 )
 
@@ -339,7 +339,6 @@ func (c *Config) GetConfiguredProvider(name string) (provider.Provider, error) {
 	return c.GetProvider(name)
 }
 
-//
 func (c *Config) IsIPAddressAuthenticated(address string) (bool, error) {
 	addr := net.ParseIP(address)
 	if addr == nil {
