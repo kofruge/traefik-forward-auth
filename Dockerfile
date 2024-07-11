@@ -1,5 +1,5 @@
 # Start by building the application.
-FROM golang:1.22 as build
+FROM golang:1.22 AS build
 
 WORKDIR /usr/src/traefik-forward-auth
 COPY . .
@@ -14,6 +14,6 @@ COPY --from=build /usr/src/traefik-forward-auth/traefik-forward-auth /usr/bin/tr
 ENTRYPOINT [ "/usr/bin/traefik-forward-auth" ]
 CMD []
 
-LABEL org.opencontainers.image.title traefik-forward-auth
-LABEL org.opencontainers.image.description "Forward authentication service for the Traefik reverse proxy"
-LABEL org.opencontainers.image.licenses MIT
+LABEL org.opencontainers.image.title=traefik-forward-auth
+LABEL org.opencontainers.image.description="Forward authentication service for the Traefik reverse proxy"
+LABEL org.opencontainers.image.licenses=MIT
